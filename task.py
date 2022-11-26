@@ -3,6 +3,8 @@ import re
 
 import pandas as pd
 import requests
+import seaborn as sns
+from statsmodels.formula.api import ols
 
 
 def _read_congressional_election_results(refresh: bool = False) -> pd.DataFrame:
@@ -119,3 +121,24 @@ def filter_by_region(results: pd.DataFrame, regions: iter) -> pd.DataFrame:
     df = results[~results.isUncontested & (results.party == 'D')].copy()
     df['Location'] = df.state.apply(lambda x: ('In_' + '_'.join(regions)) if x in regions else 'Elsewhere')
     return df
+
+
+def make_plot_and_fit_model(results: pd.DataFrame, formula: str, competitive_only: bool = False) -> str:
+    df = (results[results.isCompetitive] if competitive_only else results).copy()
+
+    hue_order = list(df.Location.unique())
+    hue_order.remove('Elsewhere')
+    hue_order.append('Elsewhere')
+
+    title = f'Democratic Performance by Region{" - in Competitive CDs" if competitive_only else ""}'
+    plt = sns.lmplot(data=df, x='votePctPres', y='votePct', hue='Location', palette=(
+        'purple', 'grey'), hue_order=hue_order, markers=['o', '.'], facet_kws=dict(legend_out=False))
+    plt.set_xlabels(label='2020 Biden Share')
+    plt.set_ylabels(label='2022 Congressional (D) Share')
+    plt.fig.suptitle(title)
+    plt.fig.set_size_inches(8, 6)
+
+    model = ols(formula, data=df)
+    fitted = model.fit()
+    summary = fitted.summary()
+    return '\n\n'.join((title, summary.as_text()))
