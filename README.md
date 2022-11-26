@@ -2,4 +2,4 @@
 
 Comparing congressional performance by region in the 2022 elections
 
-[View Summary](Summary.ipynb)
+Summary: [View Notebook](Summary.ipynb) or [HTML](https://ankar.io/2022-congressional-performance-by-region/)
