@@ -113,3 +113,9 @@ def read_and_merge_all() -> pd.DataFrame:
     results = results.merge(_read_state_fips(), on='stateFips').merge(
         _read_presidential_results_by_congressional_district(), on=['state', 'district', 'party'])
     return results
+
+
+def filter_by_region(results: pd.DataFrame, regions: iter) -> pd.DataFrame:
+    df = results[~results.isUncontested & (results.party == 'D')].copy()
+    df['Location'] = df.state.apply(lambda x: ('In_' + '_'.join(regions)) if x in regions else 'Elsewhere')
+    return df
