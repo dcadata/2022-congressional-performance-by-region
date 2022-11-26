@@ -52,17 +52,9 @@ def _read_metadata() -> pd.DataFrame:
     return metadata
 
 
-def _read_state_fips(refresh: bool = False) -> pd.DataFrame:
-    """
-    https://transition.fcc.gov/oet/info/maps/census/fips/fips.txt
-    """
-    if refresh:
-        text = requests.get('https://transition.fcc.gov/oet/info/maps/census/fips/fips.txt').text
-        records = [i.split(None, 1) for i in text.splitlines()[16:67]]
-        fips = pd.DataFrame(records, columns=['stateFips', 'name'])
-        fips.to_csv('data/state_fips_codes.csv', index=False)
-    else:
-        fips = pd.read_csv('data/state_fips_codes.csv', dtype=str)
+def _read_state_fips() -> pd.DataFrame:
+    fips = pd.read_csv('G:/election_data/reference/state_fips_codes.csv', dtype=str).rename(columns=dict(
+        stateName='name'))
     states = pd.read_csv('G:/election_data/reference/states_table.csv', usecols=[
         'name', 'iso'], dtype=str).drop_duplicates()
     states.name = states.name.str.upper()
