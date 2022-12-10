@@ -1,3 +1,4 @@
+import datetime
 import json
 import re
 
@@ -134,3 +135,47 @@ def make_plot_and_fit_model(results: pd.DataFrame, formula: str, competitive_onl
     fitted = model.fit()
     summary = fitted.summary()
     return '\n\n'.join((title, summary.as_text()))
+
+
+def _get_fec_metadata() -> None:
+    """
+    FEC data description:
+    https://www.fec.gov/campaign-finance-data/current-campaigns-house-and-senate-file-description/
+    """
+    metadata = pd.read_html(
+        'https://www.fec.gov/campaign-finance-data/current-campaigns-house-and-senate-file-description/')[0]
+    columns = list(metadata.iloc[0])
+    metadata = metadata.iloc[1:]
+    metadata.columns = columns
+    with open('data/fec-data-columns.txt', 'w') as file:
+        file.write('\n'.join(metadata['Column name'].to_list()))
+
+
+def _read_fec_data() -> pd.DataFrame:
+    """
+    FEC bulk data:
+    https://www.fec.gov/data/browse-data/?tab=bulk-data
+    Under section House/Senate current campaigns
+    """
+    # read data
+    names = [i.strip() for i in open('data/fec-data-columns.txt').readlines()]
+    fec_data = pd.read_csv('data/fec-data.zip', sep='|', names=names)[[
+        'CAND_ID', 'CAND_OFFICE_ST', 'CAND_OFFICE_DISTRICT', 'CAND_PTY_AFFILIATION', 'TTL_RECEIPTS', 'TTL_DISB',
+        'CVG_END_DT',
+    ]]
+    # filter on House
+    fec_data = fec_data[fec_data.CAND_ID.str.startswith('H')].copy()
+    # keep only latest filing per candidate
+    fec_data.CVG_END_DT = fec_data.CVG_END_DT.apply(lambda x: datetime.datetime.strptime(x, '%m/%d/%Y'))
+    fec_data = fec_data.sort_values('CVG_END_DT').drop_duplicates(subset=['CAND_ID'], keep='last')
+    # convert district to match election results format
+    fec_data.CAND_OFFICE_DISTRICT = fec_data.CAND_OFFICE_DISTRICT.apply(lambda x: str(int(x)).zfill(2))
+    # drop minor candidates
+    fec_data = fec_data.sort_values('TTL_RECEIPTS').drop_duplicates(subset=[
+        'CAND_OFFICE_ST', 'CAND_OFFICE_DISTRICT', 'CAND_PTY_AFFILIATION'], keep='last')
+    fec_data['party'] = fec_data.CAND_PTY_AFFILIATION.apply(dict(DEM='D', DFL='D', REP='R').get)
+    fec_data = fec_data.dropna(subset=['party'])
+    # drop unnecessary columns and rename remaining columns
+    fec_data = fec_data.drop(columns=['CAND_ID', 'CVG_END_DT', 'CAND_PTY_AFFILIATION']).rename(columns=dict(
+        CAND_OFFICE_ST='state', CAND_OFFICE_DISTRICT='district', TTL_RECEIPTS='receipts', TTL_DISB='disb'))
+    return fec_data
