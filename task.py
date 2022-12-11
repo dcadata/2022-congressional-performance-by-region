@@ -2,6 +2,7 @@ import datetime
 import json
 import re
 
+import numpy as np
 import pandas as pd
 import requests
 import seaborn as sns
@@ -179,3 +180,40 @@ def _read_fec_data() -> pd.DataFrame:
     fec_data = fec_data.drop(columns=['CAND_ID', 'CVG_END_DT', 'CAND_PTY_AFFILIATION']).rename(columns=dict(
         CAND_OFFICE_ST='state', CAND_OFFICE_DISTRICT='district', TTL_RECEIPTS='receipts', TTL_DISB='disb'))
     return fec_data
+
+
+def _add_gender_predictions_based_on_first_name(results: pd.DataFrame) -> pd.DataFrame:
+    results['firstName'] = results.fullName.apply(lambda x: ''.join(re.findall('[A-Za-z]', x.split(None, 1)[0])))
+    reference = pd.read_csv('G:/GitHub/name-finder/gender_prediction_reference.csv', dtype=str)
+    results = results.merge(reference, left_on='firstName', right_on='name').drop(columns='name')
+    results = results[results.gender_prediction.isin(('f', 'm'))].drop(columns='firstName')
+    return results
+
+
+def preprocess_data_with_gender() -> pd.DataFrame:
+    # combine election results and FEC data
+    results = read_and_merge_all().merge(_read_fec_data(), on=['state', 'district', 'party'])
+    # add gender predictions
+    results = _add_gender_predictions_based_on_first_name(results)
+
+    # optionally, include opponent gender prediction
+    # gender_predictions = results[['state', 'district', 'party', 'gender_prediction']].copy()
+    # gender_predictions.party = gender_predictions.party.apply(dict(D='R', R='D').get)
+    # results = results.merge(gender_predictions.drop(columns='party'), on=['state', 'district'], suffixes=(
+    #     '', 'Opponent'))
+
+    # filter results
+    preprocessed = results[~results.isUncontested & (results.party == 'D')].copy()
+    # take log of receipts and disbursements
+    preprocessed.receipts = preprocessed.receipts.apply(np.log)
+    preprocessed.disb = preprocessed.disb.apply(np.log)
+    preprocessed = preprocessed.dropna()
+    return preprocessed
+
+
+def fit_model_with_gender(preprocessed: pd.DataFrame) -> str:
+    formula = 'votePct ~ votePctPres + disb * gender_prediction'
+    model = ols(formula, data=preprocessed)
+    fitted = model.fit()
+    summary = fitted.summary()
+    return summary.as_text()
