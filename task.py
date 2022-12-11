@@ -148,8 +148,8 @@ def _get_fec_metadata() -> None:
     columns = list(metadata.iloc[0])
     metadata = metadata.iloc[1:]
     metadata.columns = columns
-    with open('data/fec-data-columns.txt', 'w') as file:
-        file.write('\n'.join(metadata['Column name'].to_list()))
+    with open('data/fec-data-columns.json', 'w') as file:
+        json.dump(metadata['Column name'].to_list(), file, indent=2)
 
 
 def _read_fec_data() -> pd.DataFrame:
@@ -159,8 +159,7 @@ def _read_fec_data() -> pd.DataFrame:
     Under section House/Senate current campaigns
     """
     # read data
-    names = [i.strip() for i in open('data/fec-data-columns.txt').readlines()]
-    fec_data = pd.read_csv('data/fec-data.zip', sep='|', names=names)[[
+    fec_data = pd.read_csv('data/fec-data.zip', sep='|', names=json.load(open('data/fec-data-columns.json')))[[
         'CAND_ID', 'CAND_OFFICE_ST', 'CAND_OFFICE_DISTRICT', 'CAND_PTY_AFFILIATION', 'TTL_RECEIPTS', 'TTL_DISB',
         'CVG_END_DT',
     ]]

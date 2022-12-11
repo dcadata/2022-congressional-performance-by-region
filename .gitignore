@@ -2,4 +2,4 @@ __pycache__/
 .idea/
 .ipynb_checkpoints/
 data/fec-data.zip
-data/fec-data-columns.txt
+data/fec-data-columns.json
