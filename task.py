@@ -140,14 +140,15 @@ def make_plot_and_fit_model(results: pd.DataFrame, formula: str, competitive_onl
     return '\n\n'.join((title, summary.as_text()))
 
 
-def fit_model_for_turnout() -> None:
+def fit_model_for_turnout(party: str) -> None:
     results = read_and_merge_all()
-    df = results[(results.party == 'D') & ~results.isUncontested]
+    df = results[(results.party == party) & ~results.isUncontested]
 
     plot = sns.lmplot(df, x='votePctPres', y='turnoutRel', hue='isCompetitive')
     plot.fig.set_size_inches(8, 6)
-    plot.fig.suptitle("Biden '20 Vote Share vs. '22 Turnout, Among Contested CDs")
-    plot.set_xlabels("Biden '20 Vote Share")
+    pres_candidate = dict(D='Biden', R='Trump')[party]
+    plot.fig.suptitle(f"{pres_candidate} '20 Vote Share vs. '22 Turnout, Among Contested CDs")
+    plot.set_xlabels(f"{pres_candidate} '20 Vote Share")
     plot.set_ylabels("'22 Turnout as % of '20 Turnout")
 
     formula = 'turnoutRel ~ votePctPres + isCompetitive'
