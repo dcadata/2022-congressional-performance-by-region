@@ -1,3 +1,3 @@
 # 2022-congressional-performance-by-region
 
-Comparing congressional performance by region in the 2022 elections
+Analysis of Congressional performance in the 2022 midterm elections
