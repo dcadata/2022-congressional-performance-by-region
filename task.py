@@ -76,10 +76,9 @@ def _read_presidential_results_by_congressional_district() -> pd.DataFrame:
         f'{candidate}': 'votePctPres'}).assign(party=p)
     pres = pd.concat((_separate_candidates('Biden', 'D'), _separate_candidates('Trump', 'R')))
     pres.votePctPres = pres.votePctPres.apply(lambda x: x.replace(',', '')).apply(int)
-    pres = pres.merge(pres.groupby('district', as_index=False).votePctPres.sum(), on='district', suffixes=(
-        '', 'Total'))
+    pres = pres.merge(pres.groupby('district', as_index=False).votePctPres.sum(), on='district', suffixes=('', 'Total'))
     pres.votePctPres = pres.votePctPres / pres.votePctPresTotal
-    pres = pres.drop(columns='votePctPresTotal')
+    pres = pres.rename(columns=dict(votePctPresTotal='turnoutPres'))
 
     pres[['state', 'district']] = pres.district.str.split('-', expand=True)
     pres.loc[pres.district == 'AL', 'district'] = '00'
@@ -88,6 +87,7 @@ def _read_presidential_results_by_congressional_district() -> pd.DataFrame:
 
 def read_and_merge_all() -> pd.DataFrame:
     results = _read_congressional_election_results()
+    turnout = results.groupby('pecan', as_index=False).voteCount.sum().rename(columns=dict(voteCount='turnout22'))
     results = results.merge(_read_metadata(), left_on='pecan', right_on='id', suffixes=('', 'Pecan')).drop(
         columns='idPecan').merge(_read_candidates(), on=['pecan', 'id'])
 
@@ -97,7 +97,7 @@ def read_and_merge_all() -> pd.DataFrame:
     results = results.merge(results.groupby('pecan', as_index=False).voteCount.sum(), on='pecan', suffixes=(
         '', 'Total'))
     results['votePct'] = results.voteCount / results.voteCountTotal
-    results = results.drop(columns=['voteCount', 'voteCountTotal'])
+    results = results.drop(columns=['voteCount', 'voteCountTotal']).merge(turnout, on='pecan')
 
     results.isIncumbent = results.isIncumbent.fillna(0).apply(bool)
 
@@ -108,6 +108,8 @@ def read_and_merge_all() -> pd.DataFrame:
 
     results = results.merge(_read_state_fips(), on='stateFips').merge(
         _read_presidential_results_by_congressional_district(), on=['state', 'district', 'party'])
+
+    results['turnoutRel'] = results.turnout22 / results.turnoutPres
     return results
 
 
@@ -136,6 +138,23 @@ def make_plot_and_fit_model(results: pd.DataFrame, formula: str, competitive_onl
     fitted = model.fit()
     summary = fitted.summary()
     return '\n\n'.join((title, summary.as_text()))
+
+
+def fit_model_for_turnout() -> None:
+    results = read_and_merge_all()
+    df = results[(results.party == 'D') & ~results.isUncontested]
+
+    plot = sns.lmplot(df, x='votePctPres', y='turnoutRel', hue='isCompetitive')
+    plot.fig.set_size_inches(8, 6)
+    plot.fig.suptitle("Biden '20 Vote Share vs. '22 Turnout, Among Contested CDs")
+    plot.set_xlabels("Biden '20 Vote Share")
+    plot.set_ylabels("'22 Turnout as % of '20 Turnout")
+
+    formula = 'turnoutRel ~ votePctPres + isCompetitive'
+    model = ols(formula, data=df)
+    fitted = model.fit()
+    summary = fitted.summary()
+    print(summary.as_text())
 
 
 def _get_fec_metadata() -> None:
