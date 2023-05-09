@@ -1,8 +1,6 @@
-import datetime
 import json
 import re
 
-import numpy as np
 import pandas as pd
 import requests
 import seaborn as sns
@@ -156,83 +154,3 @@ def fit_model_for_turnout(party: str) -> None:
     fitted = model.fit()
     summary = fitted.summary()
     print(summary.as_text())
-
-
-def _get_fec_metadata() -> None:
-    """
-    FEC data description:
-    https://www.fec.gov/campaign-finance-data/current-campaigns-house-and-senate-file-description/
-    """
-    metadata = pd.read_html(
-        'https://www.fec.gov/campaign-finance-data/current-campaigns-house-and-senate-file-description/')[0]
-    columns = list(metadata.iloc[0])
-    metadata = metadata.iloc[1:]
-    metadata.columns = columns
-    with open('data/fec-data-columns.json', 'w') as file:
-        json.dump(metadata['Column name'].to_list(), file, indent=2)
-
-
-def _read_fec_data() -> pd.DataFrame:
-    """
-    FEC bulk data:
-    https://www.fec.gov/data/browse-data/?tab=bulk-data
-    Under section House/Senate current campaigns
-    """
-    # read data
-    fec_data = pd.read_csv('data/fec-data.zip', sep='|', names=json.load(open('data/fec-data-columns.json')))[[
-        'CAND_ID', 'CAND_OFFICE_ST', 'CAND_OFFICE_DISTRICT', 'CAND_PTY_AFFILIATION', 'TTL_RECEIPTS', 'TTL_DISB',
-        'CVG_END_DT',
-    ]]
-    # filter on House
-    fec_data = fec_data[fec_data.CAND_ID.str.startswith('H')].copy()
-    # keep only latest filing per candidate
-    fec_data.CVG_END_DT = fec_data.CVG_END_DT.apply(lambda x: datetime.datetime.strptime(x, '%m/%d/%Y'))
-    fec_data = fec_data.sort_values('CVG_END_DT').drop_duplicates(subset=['CAND_ID'], keep='last')
-    # convert district to match election results format
-    fec_data.CAND_OFFICE_DISTRICT = fec_data.CAND_OFFICE_DISTRICT.apply(lambda x: str(int(x)).zfill(2))
-    # drop minor candidates
-    fec_data = fec_data.sort_values('TTL_RECEIPTS').drop_duplicates(subset=[
-        'CAND_OFFICE_ST', 'CAND_OFFICE_DISTRICT', 'CAND_PTY_AFFILIATION'], keep='last')
-    fec_data['party'] = fec_data.CAND_PTY_AFFILIATION.apply(dict(DEM='D', DFL='D', REP='R').get)
-    fec_data = fec_data.dropna(subset=['party'])
-    # drop unnecessary columns and rename remaining columns
-    fec_data = fec_data.drop(columns=['CAND_ID', 'CVG_END_DT', 'CAND_PTY_AFFILIATION']).rename(columns=dict(
-        CAND_OFFICE_ST='state', CAND_OFFICE_DISTRICT='district', TTL_RECEIPTS='receipts', TTL_DISB='disb'))
-    return fec_data
-
-
-def _add_gender_predictions_based_on_first_name(results: pd.DataFrame) -> pd.DataFrame:
-    results['firstName'] = results.fullName.apply(lambda x: ''.join(re.findall('[A-Za-z]', x.split(None, 1)[0])))
-    reference = pd.read_csv('G:/GitHub/name-finder/gender_prediction_reference.csv', dtype=str)
-    results = results.merge(reference, left_on='firstName', right_on='name').drop(columns='name')
-    results = results[results.gender_prediction.isin(('f', 'm'))].drop(columns='firstName')
-    return results
-
-
-def preprocess_data_with_gender() -> pd.DataFrame:
-    # combine election results and FEC data
-    results = read_and_merge_all().merge(_read_fec_data(), on=['state', 'district', 'party'])
-    # add gender predictions
-    results = _add_gender_predictions_based_on_first_name(results)
-
-    # optionally, include opponent gender prediction
-    # gender_predictions = results[['state', 'district', 'party', 'gender_prediction']].copy()
-    # gender_predictions.party = gender_predictions.party.apply(dict(D='R', R='D').get)
-    # results = results.merge(gender_predictions.drop(columns='party'), on=['state', 'district'], suffixes=(
-    #     '', 'Opponent'))
-
-    # filter results
-    preprocessed = results[~results.isUncontested & (results.party == 'D')].copy()
-    # take log of receipts and disbursements
-    preprocessed.receipts = preprocessed.receipts.apply(np.log)
-    preprocessed.disb = preprocessed.disb.apply(np.log)
-    preprocessed = preprocessed.dropna()
-    return preprocessed
-
-
-def fit_model_with_gender(preprocessed: pd.DataFrame) -> str:
-    formula = 'votePct ~ votePctPres + disb * gender_prediction'
-    model = ols(formula, data=preprocessed)
-    fitted = model.fit()
-    summary = fitted.summary()
-    return summary.as_text()
