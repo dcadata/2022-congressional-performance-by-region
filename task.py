@@ -7,15 +7,19 @@ import seaborn as sns
 from statsmodels.formula.api import ols
 
 
-def _read_congressional_election_results(refresh: bool = False) -> pd.DataFrame:
+def _read_midterm_election_results(office: str, refresh: bool = False) -> pd.DataFrame:
     """
-    Unofficial Congressional election results via Politico:
-    https://www.politico.com/election-data/2022-ge__collection__cd/data.json
+    Unofficial election results via Politico
     """
-    data_fp = 'data/congressional_election_results.json'
+    office_suffix, cols_to_drop = dict(
+        congress=('cd', ['votePct', 'winner', 'calledAt', 'originalVoteCount', 'originalVotePct', 'runoff']),
+        governor=('gov', ['votePct', 'winner', 'calledAt', 'runoff']),
+    )[office]
+    data_fp = f'data/2022-ge__collection__{office_suffix}.json'
 
     if refresh:
-        response = requests.get('https://www.politico.com/election-data/2022-ge__collection__cd/data.json')
+        response = requests.get(
+            f'https://www.politico.com/election-data/2022-ge__collection__{office_suffix}/data.json')
         with open(data_fp, 'wb') as file:
             file.write(response.content)
 
@@ -23,9 +27,8 @@ def _read_congressional_election_results(refresh: bool = False) -> pd.DataFrame:
     for contest in json.load(open(data_fp))['contests']:
         if contest['progress']['pct'] >= 0.95:
             results.append(pd.DataFrame(contest['results']).assign(pecan=contest['id']))
-    er = pd.concat(results).drop(columns=[
-        'votePct', 'winner', 'calledAt', 'originalVoteCount', 'originalVotePct', 'runoff'])
-    return er
+    election_results = pd.concat(results).drop(columns=cols_to_drop)
+    return election_results
 
 
 def _read_candidates() -> pd.DataFrame:
@@ -67,28 +70,52 @@ def _read_presidential_results_by_congressional_district() -> pd.DataFrame:
     Daily Kos Elections' 2020 presidential results by congressional district:
     https://www.dailykos.com/stories/2021/9/29/2055001/-Daily-Kos-Elections-2020-presidential-results-by-congressional-district-for-new-and-old-districts
     """
-    pres = pd.read_csv('data/DK_presidential_results_by_congressional_district.csv', usecols=[
-        'District', 'Biden', 'Trump'], dtype=str).rename(columns={'District': 'district'})
+    presidential_by_cd = pd.read_csv('data/DK_presidential_results_by_congressional_district.csv', usecols=[
+        'District', 'Biden', 'Trump'], dtype=str).rename(columns=dict(District='district'))
 
-    _separate_candidates = lambda candidate, p: pres[['district', f'{candidate}']].rename(columns={
-        f'{candidate}': 'votePctPres'}).assign(party=p)
+    for col in ('Biden', 'Trump'):
+        presidential_by_cd[col] = presidential_by_cd[col].apply(lambda x: x.replace(',', '')).apply(int)
+
+    presidential_by_cd[['state', 'district']] = presidential_by_cd.district.str.split('-', expand=True)
+    presidential_by_cd.loc[presidential_by_cd.district == 'AL', 'district'] = '00'
+    return presidential_by_cd
+
+
+def _build_presidential_results_by_congressional_district() -> pd.DataFrame:
+    pres = _read_presidential_results_by_congressional_district()
+
+    _separate_candidates = lambda candidate, p: pres[['state', 'district', candidate]].rename(columns={
+        candidate: 'votePctPres'}).assign(party=p)
     pres = pd.concat((_separate_candidates('Biden', 'D'), _separate_candidates('Trump', 'R')))
-    pres.votePctPres = pres.votePctPres.apply(lambda x: x.replace(',', '')).apply(int)
-    pres = pres.merge(pres.groupby('district', as_index=False).votePctPres.sum(), on='district', suffixes=('', 'Total'))
+
+    pres = pres.merge(pres.groupby(['state', 'district'], as_index=False).votePctPres.sum(), on=[
+        'state', 'district'], suffixes=('', 'Total'))
     pres.votePctPres = pres.votePctPres / pres.votePctPresTotal
     pres = pres.rename(columns=dict(votePctPresTotal='turnoutPres'))
-
-    pres[['state', 'district']] = pres.district.str.split('-', expand=True)
-    pres.loc[pres.district == 'AL', 'district'] = '00'
     return pres
 
 
-def read_and_merge_all() -> pd.DataFrame:
-    results = _read_congressional_election_results()
+def _build_presidential_results_by_state() -> pd.DataFrame:
+    pres = _read_presidential_results_by_congressional_district()
+    pres = pres.groupby('state', as_index=False)[['Biden', 'Trump']].sum()
+
+    _separate_candidates = lambda candidate, p: pres[['state', candidate]].rename(columns={
+        candidate: 'votePctPres'}).assign(party=p)
+    pres = pd.concat((_separate_candidates('Biden', 'D'), _separate_candidates('Trump', 'R')))
+
+    pres = pres.merge(pres.groupby('state', as_index=False).votePctPres.sum(), on='state', suffixes=('', 'Total'))
+    pres.votePctPres = pres.votePctPres / pres.votePctPresTotal
+    pres = pres.rename(columns=dict(votePctPresTotal='turnoutPres'))
+    return pres
+
+
+def _build_midterm_election_results(office: str) -> pd.DataFrame:
+    results = _read_midterm_election_results(office=office)
     turnout = results.groupby('pecan', as_index=False).voteCount.sum().rename(columns=dict(voteCount='turnout22'))
     results = results.merge(_read_metadata(), left_on='pecan', right_on='id', suffixes=('', 'Pecan')).drop(
         columns='idPecan').merge(_read_candidates(), on=['pecan', 'id'])
 
+    results.isIncumbent = results.isIncumbent.fillna(0).apply(bool)
     results.party = results.party.apply(dict(dem='D', gop='R').get)
     results = results.dropna(subset=['party'])
 
@@ -96,17 +123,36 @@ def read_and_merge_all() -> pd.DataFrame:
         '', 'Total'))
     results['votePct'] = results.voteCount / results.voteCountTotal
     results = results.drop(columns=['voteCount', 'voteCountTotal']).merge(turnout, on='pecan')
+    return results
 
-    results.isIncumbent = results.isIncumbent.fillna(0).apply(bool)
+
+def build_congressional() -> pd.DataFrame:
+    results = _build_midterm_election_results('congress')
 
     stateFips_district = results.pecan.apply(lambda x: re.search(
         '2022-11-08/([0-9]{2})/cd([0-9]{2})(Special)?/general', x).groups()[:2])
     results['stateFips'] = stateFips_district.apply(lambda x: x[0])
     results['district'] = stateFips_district.apply(lambda x: x[1])
-
     results = results.merge(_read_state_fips(), on='stateFips').merge(
-        _read_presidential_results_by_congressional_district(), on=['state', 'district', 'party'])
+        _build_presidential_results_by_congressional_district(), on=['state', 'district', 'party'])
+    return results
 
+
+def build_gubernatorial() -> pd.DataFrame:
+    results = _build_midterm_election_results('governor')
+
+    stateFips = results.pecan.apply(lambda x: re.search('2022-11-08/([0-9]{2})/gov/general', x).groups())
+    results['stateFips'] = stateFips.apply(lambda x: x[0])
+    results = results.merge(_read_state_fips(), on='stateFips').merge(
+        _build_presidential_results_by_state(), on=['state', 'party'])
+    return results
+
+
+def read_and_merge_all() -> pd.DataFrame:
+    """
+    Still used in notebook...
+    """
+    results = build_congressional()
     results['turnoutRel'] = results.turnout22 / results.turnoutPres
     return results
 
