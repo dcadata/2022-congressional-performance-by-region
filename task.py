@@ -172,7 +172,7 @@ def make_plot_and_fit_model(results: pd.DataFrame, formula: str, competitive_onl
 
     title = f'Democratic Performance by Region{" - in Competitive CDs" if competitive_only else ""}'
     plt = sns.lmplot(data=df, x='votePctPres', y='votePct', hue='Location', palette=(
-        'purple', 'grey'), hue_order=hue_order, markers=['o', '.'], facet_kws=dict(legend_out=False))
+        'purple', 'grey'), hue_order=hue_order, markers=('o', '.'), facet_kws=dict(legend_out=False))
     plt.set_xlabels(label='2020 Biden Share')
     plt.set_ylabels(label='2022 Congressional (D) Share')
     plt.fig.suptitle(title)
@@ -188,8 +188,10 @@ def fit_model_for_turnout(party: str) -> None:
     results = read_and_merge_all()
     df = results[(results.party == party) & ~results.isUncontested]
 
-    plot = sns.lmplot(df, x='votePctPres', y='turnoutRel', hue='isCompetitive')
+    plot = sns.lmplot(data=df, x='votePctPres', y='turnoutRel', hue='isCompetitive', palette=(
+        'purple', 'green'), hue_order=(False, True), markers='.')
     plot.fig.set_size_inches(8, 6)
+    plot.fig.tight_layout()
     pres_candidate = dict(D='Biden', R='Trump')[party]
     plot.fig.suptitle(f"{pres_candidate} '20 Vote Share vs. '22 Turnout, Among Contested CDs")
     plot.set_xlabels(f"{pres_candidate} '20 Vote Share")
