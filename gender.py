@@ -6,6 +6,8 @@ import numpy as np
 import pandas as pd
 from statsmodels.formula.api import ols
 
+import task
+
 
 def _get_fec_metadata() -> None:
     """
@@ -99,6 +101,14 @@ def preprocess_data(results: pd.DataFrame, include_fec: bool = False) -> pd.Data
 
     results['votePctDiff'] = results.votePct - results.votePctPres
     return results
+
+
+def load_required_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    results_congress_raw = task.build_congressional()
+    results_congress = preprocess_data(results_congress_raw)
+    results_congress_with_fec = preprocess_data(results_congress_raw, include_fec=True)
+    results_governor = preprocess_data(task.build_gubernatorial())
+    return results_congress, results_congress_with_fec, results_governor
 
 
 def fit_model(results: pd.DataFrame, formula: str) -> None:
